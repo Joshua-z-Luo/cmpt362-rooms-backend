@@ -68,6 +68,11 @@ export class RoomsDO {
 
   constructor(state: DurableObjectState) {
     this.state = state;
+    this.state.blockConcurrencyWhile(async () => {
+      const stored = (await this.state.storage.get<[string, UserInfo] | [string, Location]>(["users", "locs"])) as any;
+      if (stored?.users) this.users = new Map(stored.users as [string, UserInfo][]);
+      if (stored?.locs) this.locs = new Map(stored.locs as [string, Location][]);
+    });
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -89,6 +94,7 @@ export class RoomsDO {
       const name = typeof body.name === "string" && body.name.length ? body.name : undefined;
       if (!userId) return json({ error: "userId required" }, { status: 400 });
       this.users.set(userId, { userId, name });
+      await this.persistUsers();
       return json({ ok: true });
     }
 
@@ -98,6 +104,8 @@ export class RoomsDO {
       if (!userId) return json({ error: "userId required" }, { status: 400 });
       this.users.delete(userId);
       this.locs.delete(userId);
+      await this.state.storage.put("users", [...this.users.entries()]);
+      await this.state.storage.put("locs", [...this.locs.entries()]);
       return json({ ok: true });
     }
 
@@ -113,10 +121,16 @@ export class RoomsDO {
       const user = this.users.get(userId) || { userId };
       this.users.set(userId, user);
       this.locs.set(userId, { lat, lon, ts });
+      await this.state.storage.put("users", [...this.users.entries()]);
+      await this.state.storage.put("locs", [...this.locs.entries()]);
       return json({ ok: true });
     }
 
     return new Response("Not Found", { status: 404 });
+  }
+
+  private async persistUsers() {
+    await this.state.storage.put("users", [...this.users.entries()]);
   }
 }
 
