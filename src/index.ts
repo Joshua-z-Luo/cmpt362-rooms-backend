@@ -8,6 +8,11 @@ type Env = {
 type UserInfo = { userId: string; name?: string };
 type Location = { lat: number; lon: number; ts?: number };
 
+type ClientMsg =
+  | { type: "hello"; userId: string; name?: string }
+  | { type: "loc"; lat: number; lon: number; ts?: number }
+  | { type: "ping" };
+
 const ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
 function genCode(n: number) {
   let s = "";
@@ -16,7 +21,7 @@ function genCode(n: number) {
 }
 
 export default {
-  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(req: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname.replace(/\/+$/, "");
     const method = req.method.toUpperCase();
@@ -41,6 +46,7 @@ export default {
       const code = matchWs[1];
       const id = env.ROOMS_DO.idFromName(code);
       const doStub = env.ROOMS_DO.get(id);
+
       const pair = new WebSocketPair();
       await doStub.fetch("https://do/ws", {
         method: "POST",
@@ -78,50 +84,61 @@ export class RoomsDO {
       return json({ users, locs: locsObj });
     }
 
-    if (url.pathname === "/ws" && (req as any).webSocket) {
-      const client = (req as any).webSocket as WebSocket;
+    const maybeWs = (req as unknown as { webSocket?: WebSocket }).webSocket;
+    if (url.pathname === "/ws" && maybeWs) {
+      const client = maybeWs as WebSocket;
       client.accept();
+
       this.sockets.set(client, { userId: `anon-${Math.random().toString(16).slice(2)}` });
       this.sendSnapshot(client);
+
       client.addEventListener("message", (ev) => {
         try {
-          const msg = JSON.parse(ev.data as string);
+          const msg = JSON.parse(ev.data as string) as ClientMsg;
           this.onMessage(client, msg);
-        } catch {}
+        } catch {
+          // ignore malformed
+        }
       });
+
       client.addEventListener("close", () => {
         const info = this.sockets.get(client);
         this.sockets.delete(client);
         if (info) this.broadcast({ type: "peer-left", userId: info.userId }, client);
       });
+
       return new Response(null, { status: 101, webSocket: client as any });
     }
 
     return new Response("Not Found", { status: 404 });
   }
 
-  private onMessage(ws: WebSocket, msg: any) {
-    if (msg?.type === "hello") {
-      const info: UserInfo = { userId: String(msg.userId || ""), name: msg.name ? String(msg.name) : undefined };
-      if (!info.userId) return;
-      this.sockets.set(ws, info);
-      this.broadcast({ type: "peer-join", user: info }, ws);
-      return;
-    }
-
-    if (msg?.type === "loc") {
-      const info = this.sockets.get(ws);
-      if (!info?.userId) return;
-      const loc: Location = { lat: Number(msg.lat), lon: Number(msg.lon), ts: msg.ts ? Number(msg.ts) : Date.now() };
-      if (!Number.isFinite(loc.lat) || !Number.isFinite(loc.lon)) return;
-      this.locs.set(info.userId, loc);
-      this.broadcast({ type: "peer-loc", from: info, loc }, ws);
-      return;
-    }
-
-    if (msg?.type === "ping") {
-      ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
-      return;
+  private onMessage(ws: WebSocket, msg: ClientMsg) {
+    switch (msg.type) {
+      case "hello": {
+        const info: UserInfo = { userId: String(msg.userId || ""), name: msg.name };
+        if (!info.userId) return;
+        this.sockets.set(ws, info);
+        this.broadcast({ type: "peer-join", user: info }, ws);
+        return;
+      }
+      case "loc": {
+        const info = this.sockets.get(ws);
+        if (!info?.userId) return;
+        const loc: Location = {
+          lat: Number(msg.lat),
+          lon: Number(msg.lon),
+          ts: msg.ts ? Number(msg.ts) : Date.now(),
+        };
+        if (!Number.isFinite(loc.lat) || !Number.isFinite(loc.lon)) return;
+        this.locs.set(info.userId, loc);
+        this.broadcast({ type: "peer-loc", from: info, loc }, ws);
+        return;
+      }
+      case "ping": {
+        ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
+        return;
+      }
     }
   }
 
