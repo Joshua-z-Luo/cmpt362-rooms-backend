@@ -1,0 +1,14 @@
+name = "cmpt362-rooms-backend"
+main = "src/index.ts"
+compatibility_date = "2025-11-04"
+
+[vars]
+ROOM_CODE_LEN = "6"
+
+[[durable_objects.bindings]]
+name = "ROOMS_DO"
+class_name = "RoomsDO"
+
+[[migrations]]
+tag = "v1-initial"
+new_sqlite_classes = ["RoomsDO"]
