@@ -1,10 +1,12 @@
 type Env = {
   ROOMS_DO: DurableObjectNamespace;
   ROOM_CODE_LEN: string;
+  ROOM_TTL_SEC: string;
 };
 
 type UserInfo = { userId: string; name?: string };
 type Location = { lat: number; lon: number; ts?: number };
+type Member = { userId: string; name?: string; loc?: Location; updatedAt: number };
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
 function genCode(n: number) {
@@ -63,9 +65,7 @@ export default {
 
 export class RoomsDO {
   state: DurableObjectState;
-  users = new Map<string, UserInfo>();
-  locs = new Map<string, Location>();
-  lastUpdated = 0;
+  members = new Map<string, Member>();
   ttlMs = 0;
 
   constructor(state: DurableObjectState, env: Env) {
@@ -73,15 +73,8 @@ export class RoomsDO {
     this.ttlMs = Math.max(5, parseInt(env.ROOM_TTL_SEC || "300", 10)) * 1000;
 
     this.state.blockConcurrencyWhile(async () => {
-      const m = await this.state.storage.get(["users", "locs", "lastUpdated"]);
-      const u = (m as Map<string, unknown>).get("users") as [string, UserInfo][] | undefined;
-      const l = (m as Map<string, unknown>).get("locs") as [string, Location][] | undefined;
-      const t = (m as Map<string, unknown>).get("lastUpdated") as number | undefined;
-
-      if (u) this.users = new Map(u);
-      if (l) this.locs = new Map(l);
-      this.lastUpdated = typeof t === "number" ? t : 0;
-
+      const m = (await this.state.storage.get("members")) as [string, Member][] | undefined;
+      if (m) this.members = new Map(m);
       await this.maybeExpire(Date.now());
     });
   }
@@ -95,7 +88,13 @@ export class RoomsDO {
     await this.maybeExpire(Date.now());
 
     if (path === "/state") {
-      return json({ users: [...this.users.values()], locs: Object.fromEntries(this.locs.entries()) });
+      const users: UserInfo[] = [];
+      const locs: Record<string, Location> = {};
+      for (const [, mem] of this.members) {
+        users.push({ userId: mem.userId, name: mem.name });
+        if (mem.loc) locs[mem.userId] = mem.loc;
+      }
+      return json({ members: [...this.members.values()] });
     }
 
     if (path === "/join" && req.method === "POST") {
@@ -103,8 +102,11 @@ export class RoomsDO {
       const userId = String(body.userId || "");
       const name = typeof body.name === "string" && body.name.length ? body.name : undefined;
       if (!userId) return json({ error: "userId required" }, { status: 400 });
-      this.users.set(userId, { userId, name });
-      await this.touchAndPersist();
+      const now = Date.now();
+      const prev = this.members.get(userId);
+      const mem: Member = { userId, name: name ?? prev?.name, loc: prev?.loc, updatedAt: now };
+      this.members.set(userId, mem);
+      await this.touchAndPersist(now);
       return json({ ok: true });
     }
 
@@ -112,9 +114,8 @@ export class RoomsDO {
       const body: any = await readAny(req);
       const userId = String(body.userId || "");
       if (!userId) return json({ error: "userId required" }, { status: 400 });
-      this.users.delete(userId);
-      this.locs.delete(userId);
-      await this.touchAndPersist();
+      this.members.delete(userId);
+      await this.touchAndPersist(Date.now());
       return json({ ok: true });
     }
 
@@ -127,10 +128,11 @@ export class RoomsDO {
       if (!userId || !Number.isFinite(lat) || !Number.isFinite(lon)) {
         return json({ error: "userId, lat, lon required" }, { status: 400 });
       }
-      const user = this.users.get(userId) || { userId };
-      this.users.set(userId, user);
-      this.locs.set(userId, { lat, lon, ts });
-      await this.touchAndPersist();
+      const prev = this.members.get(userId);
+      const now = Date.now();
+      const mem: Member = { userId, name: prev?.name, loc: { lat, lon, ts }, updatedAt: now };
+      this.members.set(userId, mem);
+      await this.touchAndPersist(now);
       return json({ ok: true });
     }
 
@@ -141,24 +143,20 @@ export class RoomsDO {
     await this.maybeExpire(Date.now());
   }
 
-  private async touchAndPersist() {
-    this.lastUpdated = Date.now();
-    await this.state.storage.put("users", [...this.users.entries()]);
-    await this.state.storage.put("locs", [...this.locs.entries()]);
-    await this.state.storage.put("lastUpdated", this.lastUpdated);
-    await this.state.storage.setAlarm(this.lastUpdated + this.ttlMs);
+  private async touchAndPersist(now: number) {
+    const maxUpdated = Math.max(0, ...Array.from(this.members.values()).map(m => m.updatedAt));
+    await this.state.storage.put("members", [...this.members.entries()]);
+    if (maxUpdated) await this.state.storage.setAlarm(maxUpdated + this.ttlMs);
   }
 
   private async maybeExpire(now: number) {
-    if (this.lastUpdated && now - this.lastUpdated >= this.ttlMs) {
-      this.users.clear();
-      this.locs.clear();
-      this.lastUpdated = 0;
+    const maxUpdated = Math.max(0, ...Array.from(this.members.values()).map(m => m.updatedAt));
+    if (maxUpdated && now - maxUpdated >= this.ttlMs) {
+      this.members.clear();
       await this.state.storage.deleteAll();
     }
   }
 }
-
 
 async function readAny(req: Request): Promise<any> {
   try {
