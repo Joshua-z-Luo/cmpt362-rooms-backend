@@ -4,6 +4,7 @@ compatibility_date = "2025-11-04"
 
 [vars]
 ROOM_CODE_LEN = "6"
+ROOM_TTL_SEC = "300"
 
 [[durable_objects.bindings]]
 name = "ROOMS_DO"
