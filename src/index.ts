@@ -15,6 +15,10 @@ type Member = {
 };
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
+
+const codeRe = (env: Env, tail: string) =>
+  new RegExp(`^/rooms/([${ALPHABET}]{${(+env.ROOM_CODE_LEN || 6)}})/${tail}$`);
+
 function genCode(n: number) {
   let s = "";
   for (let i = 0; i < n; i++) s += ALPHABET[(Math.random() * ALPHABET.length) | 0];
@@ -37,14 +41,14 @@ export default {
       return json({ code });
     }
 
-    const mState = path.match(/^\/rooms\/([A-Z0-9]{4,12})\/state$/);
+    const mState = path.match(codeRe(env, "state"));
     if (method === "GET" && mState) {
       const code = mState[1];
       const id = env.ROOMS_DO.idFromName(code);
       return env.ROOMS_DO.get(id).fetch("https://do/state");
     }
 
-    const mJoin = path.match(/^\/rooms\/([A-Z0-9]{4,12})\/join$/);
+    const mJoin = path.match(codeRe(env, "join"));
     if (method === "POST" && mJoin) {
       const code = mJoin[1];
       const body = await readAny(req);
@@ -55,7 +59,7 @@ export default {
       });
     }
 
-    const mLeave = path.match(/^\/rooms\/([A-Z0-9]{4,12})\/leave$/);
+    const mLeave = path.match(codeRe(env, "leave"));
     if (method === "POST" && mLeave) {
       const code = mLeave[1];
       const body = await readAny(req);
@@ -66,7 +70,7 @@ export default {
       });
     }
 
-    const mLoc = path.match(/^\/rooms\/([A-Z0-9]{4,12})\/loc$/);
+    const mLoc = path.match(codeRe(env, "loc"));
     if (method === "POST" && mLoc) {
       const code = mLoc[1];
       const body = await readAny(req);
