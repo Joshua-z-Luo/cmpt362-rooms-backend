@@ -9,6 +9,9 @@ type Location = { lat: number; lon: number; ts?: number };
 type AbilityActivation = { id: string; ts: number };
 type PlayerStatus = { team?: string; role?: string; health?: number };
 
+type SettingKV = { key: string; value: string };
+type Settings = SettingKV[];
+
 type Member = {
   userId: string;
   name?: string;
@@ -108,6 +111,24 @@ export default {
       });
     }
 
+    const mSettings = path.match(codeRe(env, "settings"));
+    if (mSettings && method === "GET") {
+      const code = mSettings[1];
+      const id = env.ROOMS_DO.idFromName(code);
+      return env.ROOMS_DO.get(id).fetch("https://do/settings");
+    }
+
+    if (mSettings && method === "POST") {
+      const code = mSettings[1];
+      const body = await readAny(req);
+      const id = env.ROOMS_DO.idFromName(code);
+      return env.ROOMS_DO.get(id).fetch("https://do/settings", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    }
+    
+
     return new Response("Not Found", { status: 404 });
   },
 };
@@ -116,6 +137,7 @@ export class RoomsDO {
   state: DurableObjectState;
   members = new Map<string, Member>();
   ttlMs = 0;
+  settings: Settings = [];
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -124,6 +146,8 @@ export class RoomsDO {
     this.state.blockConcurrencyWhile(async () => {
       const m = (await this.state.storage.get("members")) as [string, Member][] | undefined;
       if (m) this.members = new Map(m);
+      const s = (await this.state.storage.get("settings")) as Settings | undefined;
+      if (s) this.settings = s;
       await this.maybeExpire(Date.now());
     });
   }
@@ -299,6 +323,25 @@ export class RoomsDO {
       return json({ ok: true });
     }
 
+    if (path === "/settings" && req.method === "GET") {
+      return json({ settings: this.settings });
+    }
+
+    if (path === "/settings" && req.method === "POST") {
+      const body: any = await readAny(req);
+      const raw = Array.isArray(body) ? body : body.settings;
+      const list: SettingKV[] = Array.isArray(raw)
+        ? raw
+            .filter((kv: any) => kv && typeof kv.key === "string" && typeof kv.value === "string")
+            .map((kv: any) => ({ key: kv.key, value: kv.value }))
+        : [];
+      this.settings = list;
+      const now = Date.now();
+      await this.touchAndPersist(now);
+      return json({ ok: true });
+    }
+
+
     
 
     return new Response("Not Found", { status: 404 });
@@ -311,6 +354,7 @@ export class RoomsDO {
   private async touchAndPersist(now: number) {
     const maxUpdated = Math.max(0, ...Array.from(this.members.values()).map(m => m.updatedAt));
     await this.state.storage.put("members", [...this.members.entries()]);
+    await this.state.storage.put("settings", this.settings);
     if (maxUpdated) await this.state.storage.setAlarm(maxUpdated + this.ttlMs);
   }
 
