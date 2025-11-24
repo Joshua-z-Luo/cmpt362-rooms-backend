@@ -6,12 +6,17 @@ type Env = {
 
 type UserInfo = { userId: string; name?: string };
 type Location = { lat: number; lon: number; ts?: number };
+type AbilityActivation = { id: string; ts: number };
+type PlayerStatus = { team?: string; role?: string; health?: number };
+
 type Member = {
   userId: string;
   name?: string;
   loc?: Location;
   updatedAt: number;
-  token?: string; 
+  token?: string;
+  abilities?: AbilityActivation[];
+  status?: PlayerStatus;
 };
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
@@ -81,6 +86,28 @@ export default {
       });
     }
 
+    const mAbility = path.match(codeRe(env, "ability"));
+    if (method === "POST" && mAbility) {
+      const code = mAbility[1];
+      const body = await readAny(req);
+      const id = env.ROOMS_DO.idFromName(code);
+      return env.ROOMS_DO.get(id).fetch("https://do/ability", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    }
+
+    const mStatus = path.match(codeRe(env, "status"));
+    if (method === "POST" && mStatus) {
+      const code = mStatus[1];
+      const body = await readAny(req);
+      const id = env.ROOMS_DO.idFromName(code);
+      return env.ROOMS_DO.get(id).fetch("https://do/status", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    }
+
     return new Response("Not Found", { status: 404 });
   },
 };
@@ -118,12 +145,18 @@ export class RoomsDO {
       const body: any = await readAny(req);
       let userId = typeof body.userId === "string" ? body.userId.trim() : "";
       const name = typeof body.name === "string" && body.name.length ? body.name : undefined;
+      const team = typeof body.team === "string" && body.team.length ? body.team : undefined;
+      const role = typeof body.role === "string" && body.role.length ? body.role : undefined;
 
       if (!userId) userId = newUserId();
 
       const now = Date.now();
       const prev = this.members.get(userId);
       const token = prev?.token ?? newToken();
+      const health =
+        typeof body.health === "number"
+          ? body.health
+          : prev?.status?.health ?? 100;
 
       const mem: Member = {
         userId,
@@ -131,6 +164,12 @@ export class RoomsDO {
         loc: prev?.loc,
         updatedAt: now,
         token,
+        abilities: prev?.abilities ?? [],
+        status: {
+          team: team ?? prev?.status?.team,
+          role: role ?? prev?.status?.role,
+          health,
+        },
       };
 
       this.members.set(userId, mem);
@@ -176,11 +215,91 @@ export class RoomsDO {
         token: prev.token,
         loc: { lat, lon, ts },
         updatedAt: now,
+        abilities: prev.abilities ?? [],
+        status: prev.status,
       };
       this.members.set(userId, mem);
       await this.touchAndPersist(now);
       return json({ ok: true });
     }
+
+
+    if (path === "/ability" && req.method === "POST") {
+      const body: any = await readAny(req);
+      const userId = String(body.userId || "");
+      const token = String(body.token || "");
+      const abilityId = String(body.abilityId || "");
+      const ts = body.ts ? Number(body.ts) : Date.now();
+
+      if (!userId || !token || !abilityId || !Number.isFinite(ts)) {
+        return json({ error: "userId, token, abilityId required" }, { status: 400 });
+      }
+
+      const prev = this.members.get(userId);
+      if (!prev || prev.token !== token) return json({ error: "unauthorized" }, { status: 403 });
+
+      const now = Date.now();
+      const abilities = prev.abilities ? [...prev.abilities] : [];
+      abilities.push({ id: abilityId, ts });
+
+      const mem: Member = {
+        userId,
+        name: prev.name,
+        token: prev.token,
+        loc: prev.loc,
+        updatedAt: now,
+        abilities,
+        status: prev.status,
+      };
+
+      this.members.set(userId, mem);
+      await this.touchAndPersist(now);
+      return json({ ok: true });
+    }
+
+    if (path === "/status" && req.method === "POST") {
+      const body: any = await readAny(req);
+      const userId = String(body.userId || "");
+      const token = String(body.token || "");
+      const team = typeof body.team === "string" && body.team.length ? body.team : undefined;
+      const role = typeof body.role === "string" && body.role.length ? body.role : undefined;
+
+      if (!userId || !token) {
+        return json({ error: "userId and token required" }, { status: 400 });
+      }
+
+      const prev = this.members.get(userId);
+      if (!prev || prev.token !== token) return json({ error: "unauthorized" }, { status: 403 });
+
+      let health = prev.status?.health ?? 100;
+      if (body.health !== undefined) {
+        const h = Number(body.health);
+        if (Number.isFinite(h)) health = h;
+      }
+
+      const now = Date.now();
+      const status: PlayerStatus = {
+        team: team ?? prev.status?.team,
+        role: role ?? prev.status?.role,
+        health,
+      };
+
+      const mem: Member = {
+        userId,
+        name: prev.name,
+        token: prev.token,
+        loc: prev.loc,
+        updatedAt: now,
+        abilities: prev.abilities ?? [],
+        status,
+      };
+
+      this.members.set(userId, mem);
+      await this.touchAndPersist(now);
+      return json({ ok: true });
+    }
+
+    
 
     return new Response("Not Found", { status: 404 });
   }
