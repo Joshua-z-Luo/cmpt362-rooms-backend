@@ -169,7 +169,7 @@ GET /rooms/:code/state
         { "id": "scan", "ts": 1730836820000 }
       ],
       "status": {
-        "team": "red",
+        "team": "hunter",
         "role": "scout",
         "health": 100
       }
@@ -191,7 +191,8 @@ GET /rooms/:code/settings
 ```json
 {
   "settings": [
-    { "key": "music", "value": "on" },
+    { "key": "gameStart", "value": "on" },
+    { "key": "abilities", "value": "on" },
     { "key": "fog", "value": "off" }
   ]
 }
