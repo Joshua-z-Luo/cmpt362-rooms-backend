@@ -211,10 +211,13 @@ Content-Type: application/json
 **Body**
 
 ```json
-[
-  { "key": "music", "value": "off" },
-  { "key": "fog", "value": "on" }
-]
+{
+  "settings": [
+    { "key": "gameStart", "value": "on" },
+    { "key": "abilities", "value": "on" },
+    { "key": "fog", "value": "off" }
+  ]
+}
 ```
 
 **Response**
