@@ -207,18 +207,7 @@ POST /rooms/:code/settings
 Content-Type: application/json
 ```
 
-**Body (either format is allowed)**
-
-```json
-{
-  "settings": [
-    { "key": "music", "value": "off" },
-    { "key": "fog", "value": "on" }
-  ]
-}
-```
-
-or simply:
+**Body**
 
 ```json
 [
