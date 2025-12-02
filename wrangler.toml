@@ -8,12 +8,8 @@ ROOM_TTL_SEC = "300"
 
 [[durable_objects.bindings]]
 name = "ROOMS_DO"
-class_name = "RoomsDOv2"
+class_name = "RoomsDO"
 
 [[migrations]]
 tag = "v1-initial"
 new_sqlite_classes = ["RoomsDO"]
-
-[[migrations]]
-tag = "v2-reset"
-new_sqlite_classes = ["RoomsDOv2"]

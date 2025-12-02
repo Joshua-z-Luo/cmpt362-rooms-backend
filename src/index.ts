@@ -127,12 +127,13 @@ export default {
         body: JSON.stringify(body),
       });
     }
+    
 
     return new Response("Not Found", { status: 404 });
   },
 };
 
-export class RoomsDOv2 {
+export class RoomsDO {
   state: DurableObjectState;
   members = new Map<string, Member>();
   ttlMs = 0;
@@ -200,6 +201,7 @@ export class RoomsDOv2 {
       return json({ ok: true, userId, token });
     }
 
+
     if (path === "/leave" && req.method === "POST") {
       const body: any = await readAny(req);
       const userId = String(body.userId || "");
@@ -213,6 +215,7 @@ export class RoomsDOv2 {
       await this.touchAndPersist(Date.now());
       return json({ ok: true });
     }
+
 
     if (path === "/loc" && req.method === "POST") {
       const body: any = await readAny(req);
@@ -243,6 +246,7 @@ export class RoomsDOv2 {
       await this.touchAndPersist(now);
       return json({ ok: true });
     }
+
 
     if (path === "/ability" && req.method === "POST") {
       const body: any = await readAny(req);
@@ -336,6 +340,9 @@ export class RoomsDOv2 {
       await this.touchAndPersist(now);
       return json({ ok: true });
     }
+
+
+    
 
     return new Response("Not Found", { status: 404 });
   }
