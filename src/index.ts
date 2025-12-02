@@ -133,7 +133,7 @@ export default {
   },
 };
 
-export class RoomsDOv2 {
+export class RoomsDO {
   state: DurableObjectState;
   members = new Map<string, Member>();
   ttlMs = 0;
